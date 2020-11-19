@@ -31,11 +31,12 @@
     "chai-exec": "^2.1.1"
   },
   "dependencies": {
+    "@ethereum-sourcify/core": "*",
     "@types/adm-zip": "^0.4.33",
     "adm-zip": "^0.4.16",
     "bunyan": "^1.8.14",
     "commander": "^6.1.0",
-    "@ethereum-sourcify/core": "*",
+    "node-fetch": "^2.6.1",
     "web3": "^1.2.11"
   }
 }

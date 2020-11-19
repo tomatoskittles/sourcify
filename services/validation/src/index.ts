@@ -81,7 +81,7 @@ program
         `Only available with the --${OPTION_NAME} option\n`
     );
 
-if (require.main === module) {
+async function main() {
     program.parse(process.argv);
     const fileNames = program.args; // what's left from process.argv
     const fileNamesJoint = fileNames.join(" ");
@@ -96,7 +96,7 @@ if (require.main === module) {
     let checkedContracts: CheckedContract[] = [];
     const ignoring: any[] = [];
     try {
-        checkedContracts = validationService.checkPaths(fileNames, ignoring);
+        checkedContracts = await validationService.checkPaths(fileNames, ignoring);
     } catch (err) {
         console.log(err.message);
         process.exitCode = 1;
@@ -142,4 +142,8 @@ if (require.main === module) {
     if (invalidContracts > 0) {
         process.exitCode = 1;
     }
+}
+
+if (require.main === module) {
+    main();
 }

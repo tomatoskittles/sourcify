@@ -5,11 +5,16 @@ import AdmZip from 'adm-zip';
 import fs from 'fs';
 import Path from 'path';
 import CheckedContract from './CheckedContract';
+const fetch = require("node-fetch");
 
 /**
  * Regular expression matching metadata nested within another json.
  */
 const NESTED_METADATA_REGEX = /"{\\"compiler\\":{\\"version\\".*?},\\"version\\":1}"/;
+
+const GITHUB_REGEX = /^https?:\/\/github.com/;
+
+const IPFS_PREFIX = "dweb:/ipfs/";
 
 export class PathBuffer {
     path?: string;
@@ -44,7 +49,7 @@ export interface IValidationService {
      * @returns An array of CheckedContract objects.
      * @throws Error if no metadata files are found.
      */
-    checkPaths(paths: string[], ignoring?: string[]): CheckedContract[];
+    checkPaths(paths: string[], ignoring?: string[]): Promise<CheckedContract[]>;
 
     /**
      * Checks the files provided in the array of Buffers. May include buffers of zip archives.
@@ -54,7 +59,7 @@ export interface IValidationService {
      * @returns An array of CheckedContract objets.
      * @throws Error if no metadata files are found.
      */
-    checkFiles(files: PathBuffer[]): CheckedContract[];
+    checkFiles(files: PathBuffer[]): Promise<CheckedContract[]>;
 }
 
 export class ValidationService implements IValidationService {
@@ -67,7 +72,7 @@ export class ValidationService implements IValidationService {
         this.logger = logger;
     }
 
-    checkPaths(paths: string[], ignoring?: string[]): CheckedContract[] {
+    async checkPaths(paths: string[], ignoring?: string[]): Promise<CheckedContract[]> {
         const files: PathBuffer[] = [];
         paths.forEach(path => {
             if (fs.existsSync(path)) {
@@ -84,7 +89,7 @@ export class ValidationService implements IValidationService {
         return this.checkFiles(files);
     }
 
-    checkFiles(files: PathBuffer[]): CheckedContract[] {
+    async checkFiles(files: PathBuffer[]): Promise<CheckedContract[]> {
         const inputFiles = this.findInputFiles(files);
         // const sanitizedFiles = this.sanitizeInputFiles(inputFiles);
         const parsedFiles = inputFiles.map(pathBuffer => new PathContent(pathBuffer.buffer.toString(), pathBuffer.path));
@@ -93,14 +98,14 @@ export class ValidationService implements IValidationService {
         const checkedContracts: CheckedContract[] = [];
         const errorMsgMaterial: string[] = [];
 
-        metadataFiles.forEach(metadata => {
-            const { foundSources, missingSources, invalidSources } = this.rearrangeSources(metadata, parsedFiles);
+        for (const metadata of metadataFiles) {
+            const { foundSources, missingSources, invalidSources } = await this.rearrangeSources(metadata, parsedFiles);
             const checkedContract = new CheckedContract(metadata, foundSources, missingSources, invalidSources);
             checkedContracts.push(checkedContract);
             if (!checkedContract.isValid()) {
                 errorMsgMaterial.push(checkedContract.info);
             }
-        });
+        }
 
         if (errorMsgMaterial.length) {
             const msg = errorMsgMaterial.join("\n");
@@ -161,40 +166,6 @@ export class ValidationService implements IValidationService {
         this.traversePathRecursively(tmpDir, fs.unlinkSync, fs.rmdirSync);
     }
 
-    private sanitizeInputFiles(files: PathBuffer[]): PathContent[] {
-        const sanitizedFiles: PathContent[] = [];
-        if (!files.length) {
-            const msg = 'Unable to extract any files. Your request may be misformatted ' +
-                'or missing some content.';
-            if (this.logger) this.logger.error(msg);
-            throw new Error(msg);
-
-        }
-
-        for (const file of files) {
-            const content: string = file.buffer.toString();
-            /*try {
-                const val = JSON.parse(file.buffer.toString());
-                const type = Object.prototype.toString.call(val);
-
-                // JSON formatted metadata or Stringified metadata
-                if (type === '[object Object]') {
-                    content = JSON.stringify(val);
-                } else if (Array.isArray(val)) {
-                    content = JSON.stringify(val[0]);
-                } else {
-                    content = val;
-                }
-
-            } catch (err) {
-                content = file.buffer.toString();          // Solidity files
-            }*/
-
-            sanitizedFiles.push(new PathContent(content, file.path));
-        }
-        return sanitizedFiles;
-    }
-
     /**
      * Selects metadata files from an array of files that may include sources, etc
      * @param  {string[]} files
@@ -233,7 +204,7 @@ export class ValidationService implements IValidationService {
      * @param  {string[]}  files    source files
      * @return foundSources, missingSources, invalidSources
      */
-    private rearrangeSources(metadata: any, files: PathContent[]) {
+    private async rearrangeSources(metadata: any, files: PathContent[]) {
         const foundSources: SourceMap = {};
         const missingSources: any = {};
         const invalidSources: StringMap = {};
@@ -251,10 +222,17 @@ export class ValidationService implements IValidationService {
                     continue;
                 }
             } else {
-                file = byHash.get(hash);
+                file = byHash.get(hash) || file;
             }
 
-            if (file && file.content) {
+            if (!file.content && sourceInfo.urls) {
+                console.log("DEBUG", fileName, sourceInfo.urls);
+                const fetched = await this.attemptFetching(fileName, sourceInfo.urls); // TODO check if the provided hash matches with the hash of the fetched file
+                console.log(fetched ? "yes" : "no");
+                file.content = fetched || file.content; // update byHash
+            }
+
+            if (file.content) {
                 foundSources[fileName] = file;
             } else {
                 missingSources[fileName] = { keccak256: hash, urls: sourceInfo.urls };
@@ -278,6 +256,29 @@ export class ValidationService implements IValidationService {
             byHash.set(calculatedHash, files[i]);
         }
         return byHash;
+    }
+
+    private async attemptFetching(fileName: string, urls: string[]): Promise<string> {
+        fileName = fileName.trim();
+        if (GITHUB_REGEX.test(fileName)) { // TODO test this case
+            const rawGithubUrl = fileName.replace("github", "raw.githubusercontent");
+            return this.performRequest(rawGithubUrl);
+        } else if (fileName.startsWith("@openzeppelin")) {
+            for (const url of urls) { // TODO 
+                if (url.startsWith(IPFS_PREFIX)) {
+                    const ipfsCode = url.split(IPFS_PREFIX)[1];
+                    const ipfsUrl = 'https://ipfs.infura.io:5001/api/v0/cat?arg='+ipfsCode;
+                    return this.performRequest(ipfsUrl);
+                }
+            }
+        }
+        return null;
+    }
+
+    private async performRequest(url: string): Promise<string> {
+        const res = await fetch(url);
+        const content = await res.text();
+        return content;
     }
 
     private extractMetadataFromString(file: string): any {
