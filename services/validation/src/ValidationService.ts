@@ -65,14 +65,17 @@ export interface IValidationService {
 export class ValidationService implements IValidationService {
     logger: bunyan;
 
+    /** Should fetch missing sources */
+    fetch: boolean;
     /**
      * @param logger a custom logger that logs all errors; undefined or no logger provided turns the logging off
      */
-    constructor(logger?: bunyan) {
+    constructor(logger?: bunyan, fetch?: false) {
         this.logger = logger;
+        this.fetch = fetch;
     }
 
-    async checkPaths(paths: string[], ignoring?: string[]): Promise<CheckedContract[]> {
+    checkPaths(paths: string[], ignoring?: string[]): Promise<CheckedContract[]> {
         const files: PathBuffer[] = [];
         paths.forEach(path => {
             if (fs.existsSync(path)) {
@@ -91,7 +94,6 @@ export class ValidationService implements IValidationService {
 
     async checkFiles(files: PathBuffer[]): Promise<CheckedContract[]> {
         const inputFiles = this.findInputFiles(files);
-        // const sanitizedFiles = this.sanitizeInputFiles(inputFiles);
         const parsedFiles = inputFiles.map(pathBuffer => new PathContent(pathBuffer.buffer.toString(), pathBuffer.path));
         const metadataFiles = this.findMetadataFiles(parsedFiles);
 
@@ -109,7 +111,7 @@ export class ValidationService implements IValidationService {
 
         if (errorMsgMaterial.length) {
             const msg = errorMsgMaterial.join("\n");
-            if (this.logger) this.logger.error(msg);
+            this.log(msg);
         }
 
         return checkedContracts;
@@ -184,13 +186,18 @@ export class ValidationService implements IValidationService {
             }
 
             if (metadata) {
+                const compilationTargetsNumber = Object.keys(metadata.settings.compilationTarget).length;
+                const expectedTargetsNumber = 1;
+                if (compilationTargetsNumber !== expectedTargetsNumber) {
+                    const msg = `Metadata (${file.path}) specifying ${compilationTargetsNumber} entries in compilationTarget; should be: ${expectedTargetsNumber}`;
+                }
                 metadataCollection.push(metadata);
             }
         }
 
         if (!metadataCollection.length) {
             const msg = "Metadata file not found. Did you include \"metadata.json\"?";
-            if (this.logger) this.logger.error(msg);
+            this.log(msg);
             throw new Error(msg);
         }
 
@@ -208,7 +215,7 @@ export class ValidationService implements IValidationService {
         const foundSources: SourceMap = {};
         const missingSources: any = {};
         const invalidSources: StringMap = {};
-        const byHash = this.storeByHash(files);
+        const hash2file = this.storeByHash(files);
 
         for (const fileName in metadata.sources) {
             const sourceInfo = metadata.sources[fileName];
@@ -222,14 +229,15 @@ export class ValidationService implements IValidationService {
                     continue;
                 }
             } else {
-                file = byHash.get(hash) || file;
+                file = hash2file.get(hash) || file;
             }
 
             if (!file.content && sourceInfo.urls) {
-                console.log("DEBUG", fileName, sourceInfo.urls);
-                const fetched = await this.attemptFetching(fileName, sourceInfo.urls); // TODO check if the provided hash matches with the hash of the fetched file
-                console.log(fetched ? "yes" : "no");
-                file.content = fetched || file.content; // update byHash
+                const fetched = await this.processFetching(fileName, sourceInfo.urls, hash);
+                if (fetched) {
+                    hash2file.set(hash, file);
+                    file.content = fetched;
+                }
             }
 
             if (file.content) {
@@ -258,27 +266,41 @@ export class ValidationService implements IValidationService {
         return byHash;
     }
 
-    private async attemptFetching(fileName: string, urls: string[]): Promise<string> {
+    private async processFetching(fileName: string, urls: string[], hash: string): Promise<string> {
         fileName = fileName.trim();
         if (GITHUB_REGEX.test(fileName)) { // TODO test this case
             const rawGithubUrl = fileName.replace("github", "raw.githubusercontent");
-            return this.performRequest(rawGithubUrl);
+            return this.performFetch(fileName, rawGithubUrl, hash);
+
         } else if (fileName.startsWith("@openzeppelin")) {
-            for (const url of urls) { // TODO 
+            for (const url of urls) {
                 if (url.startsWith(IPFS_PREFIX)) {
-                    const ipfsCode = url.split(IPFS_PREFIX)[1];
+                    const ipfsCode = url.slice(IPFS_PREFIX.length);
                     const ipfsUrl = 'https://ipfs.infura.io:5001/api/v0/cat?arg='+ipfsCode;
-                    return this.performRequest(ipfsUrl);
+                    return this.performFetch(fileName, ipfsUrl, hash);
                 }
             }
         }
         return null;
     }
 
-    private async performRequest(url: string): Promise<string> {
+    private async performFetch(fileName: string, url: string, hash: string): Promise<string> {
+        this.log(`Fetching of ${fileName} from ${url}`);
         const res = await fetch(url);
-        const content = await res.text();
-        return content;
+        if (res.status === 200) {
+            const content = await res.text();
+            if (Web3.utils.keccak256(content) !== hash) {
+                this.log("The provided hash value does not match the calculated hash value of the fetched file.");
+                return null;
+            }
+
+            this.log(`Successful fetching of ${fileName} from ${url}`);
+            return content;
+
+        } else {
+            this.log(`Failed fetching of ${fileName} from ${url}`);
+            return null;
+        }
     }
 
     private extractMetadataFromString(file: string): any {
@@ -320,7 +342,7 @@ export class ValidationService implements IValidationService {
     private traversePathRecursively(path: string, worker: (filePath: string) => void, afterDirectory?: (filePath: string) => void) {
         if (!fs.existsSync(path)) {
             const msg = `Encountered a nonexistent path: ${path}`;
-            if (this.logger) {this.logger.error(msg);}
+            this.log(msg);
             throw new Error(msg);
         }
 
@@ -336,6 +358,14 @@ export class ValidationService implements IValidationService {
             if (afterDirectory) {
                 afterDirectory(path);
             }
+        }
+    }
+
+    private log(message: string, necessary = false) {
+        if (this.logger) {
+            this.logger.error(message);
+        } else if (necessary) {
+            console.log(message);
         }
     }
 }

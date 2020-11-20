@@ -9,22 +9,22 @@ function objectLength(obj) {
 
 describe("ValidationService", function() {
     describe("#checkPaths", function() {
-        it("should succeed for single source file", function() {
+        it("should succeed for single source file", async function() {
             const ignoring = [];
             const paths = [Path.join("test", "files", "single")];
-            const checkedContracts = validationService.checkPaths(paths, ignoring);
+            const checkedContracts = await validationService.checkPaths(paths, ignoring);
             
             chai.expect(ignoring).to.be.empty;
             expectationsOfSingle(checkedContracts);
         });
 
-        it("should succeed for single source file, everything provided individually", function() {
+        it("should succeed for single source file, everything provided individually", async function() {
             const ignoring = [];
             const paths = [
                 Path.join("test", "files", "single", "1_Storage.sol"),
                 Path.join("test", "files", "single", "metadata.json")
             ];
-            const checkedContracts = validationService.checkPaths(paths, ignoring);
+            const checkedContracts = await validationService.checkPaths(paths, ignoring);
             
             chai.expect(ignoring).to.be.empty;
             expectationsOfSingle(checkedContracts);
@@ -44,10 +44,10 @@ describe("ValidationService", function() {
             chai.expect(onlyContract.invalid).to.be.empty;
         }
 
-        it("should report for single source file missing", function() {
+        it("should report for single source file missing", async function() {
             const ignoring = [];
             const paths = [Path.join("test", "files", "single", "metadata.json")];
-            const checkedContracts = validationService.checkPaths(paths, ignoring);
+            const checkedContracts = await validationService.checkPaths(paths, ignoring);
 
             chai.expect(ignoring).to.be.empty;
             chai.expect(checkedContracts.length).to.equal(1);
@@ -63,21 +63,24 @@ describe("ValidationService", function() {
             chai.expect(onlyContract.invalid).to.be.empty;
         });
 
-        it("should throw for no metadata found", function() {
+        it("should throw for no metadata found", async function() {
             const paths = [Path.join("test", "files", "single", "1_Storage.sol")];
-            chai.expect(
-                () => validationService.checkPaths(paths)
-            ).to.throw();
+            try {
+                await validationService.checkPaths(paths);
+                chai.assert.fail();
+            } catch (err) {
+                chai.expect(err.name).to.equal("Error"); // assert the error is not an AssertionError
+            }
         });
 
-        it("should ignore invalid paths", function() {
+        it("should ignore invalid paths", async function() {
             const ignoring = [];
             const invalidPath = Path.join("test", "files", "foobar.sol");
             const paths = [
                 Path.join("test", "files", "single"),
                 invalidPath
             ];
-            const checkedContracts = validationService.checkPaths(paths, ignoring);
+            const checkedContracts = await validationService.checkPaths(paths, ignoring);
 
             chai.expect(ignoring).to.deep.equal([invalidPath]);
             expectationsOfSingle(checkedContracts);

@@ -80,7 +80,13 @@ export default class CheckedContract {
      */
     private getPathAndName() {
         const compilationTarget = this.metadata.settings.compilationTarget;
-        const contractPath = Object.keys(compilationTarget)[0];
+        const compilationTargetKeys = Object.keys(compilationTarget);
+        const compilationTargetsNumber = compilationTargetKeys.length;
+        const expectedTargetsNumber = 1;
+        if (compilationTargetsNumber !== expectedTargetsNumber) {
+            const msg = `Metadata specifying ${compilationTargetsNumber} entries in compilationTarget; should be: ${expectedTargetsNumber}`;
+        }
+        const contractPath = compilationTargetKeys[0];
         const contractName = compilationTarget[contractPath];
         return { contractPath, contractName };
     }

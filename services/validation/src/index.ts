@@ -79,6 +79,10 @@ program
         "-p, --pretty",
         "Output the standard json in a pretty format.\n" +
         `Only available with the --${OPTION_NAME} option\n`
+    )
+    .option(
+        "-f, --fetch",
+        "Attempt to fetch missing files (from GitHub or IPFS; if provided)"
     );
 
 async function main() {

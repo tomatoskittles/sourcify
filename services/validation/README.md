@@ -35,6 +35,8 @@ you had provided to this script.
 * -p, --pretty
   * Output the standard json in a pretty format.
   * Only available with the --prepare-json option.
+* -f, --fetch
+  * Attempt to fetch missing files (from GitHub or IPFS; if provided)
 * -h, --help
   * Output the help message.
 * -v, --version
