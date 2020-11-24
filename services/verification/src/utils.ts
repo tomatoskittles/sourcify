@@ -158,6 +158,11 @@ function reformatMetadata(
 
     input.settings = metadata.settings;
 
+    if (Object.keys(metadata.settings.compilationTarget).length !== 1) {
+        const err = new Error("metadata.settings.compilationTarget should contain only one target");
+        log.error({ loc: "[REFORMAT_METADATA]", err});
+        throw err;
+    }
     for (fileName in metadata.settings.compilationTarget) {
         contractName = metadata.settings.compilationTarget[fileName];
     }

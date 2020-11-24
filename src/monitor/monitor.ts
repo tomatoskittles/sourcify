@@ -59,7 +59,7 @@ export default class Monitor {
     this.metadataInterval = null;
 
     this.log = Logger("Monitor");
-    this.validationService = new ValidationService(this.log);
+    this.validationService = new ValidationService({logger: this.log});
 
     Injector.createAsync({
       offline: true,
@@ -642,7 +642,7 @@ export default class Monitor {
       };
 
       try {
-        const validatedFiles = this.validationService.checkFiles(inputFiles);
+        const validatedFiles = await this.validationService.checkFiles(inputFiles);
         const errors = validatedFiles
                         .filter(contract => !contract.isValid())
                         .map(contract => contract.info);

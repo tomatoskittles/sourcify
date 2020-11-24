@@ -9,7 +9,7 @@ import VerificationController from './controllers/VerificationController';
 const router: Router = Router();
 
 const fileService = new FileService(config.repository.path);
-const validationService: ValidationService = new ValidationService(Logger("ValidationService"));
+const validationService: ValidationService = new ValidationService({logger: Logger("ValidationService")});
 const verificationService = new VerificationService(fileService);
 
 const fileController = new FileController(fileService);

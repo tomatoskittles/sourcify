@@ -63,3 +63,15 @@ export function cborDecode(bytecode: number[]): any {
     const bytecodeBuffer = Buffer.from(bytecode.slice(bytecode.length - 2 - cborLength, -2));
     return cbor.decodeFirstSync(bytecodeBuffer);
 }
+
+export function assertSingleKey(object: any, objectName?: string, log?: Function) {
+    const objectLength = Object.keys(object).length;
+    if (objectLength !== 1) {
+        const prefix = objectName ? `${objectName}: ` : "";
+        const err = prefix + `Object has ${objectLength} keys. Expected: 1.`;
+        if (log) {
+            log(err);
+        }
+        throw new Error(err);
+    }
+}

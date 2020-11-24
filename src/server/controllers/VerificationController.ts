@@ -43,7 +43,7 @@ export default class VerificationController extends BaseController implements IC
             
             const filesArr: fileUpload.UploadedFile[] = [].concat(req.files!.files); // ensure an array, regardless of how many files received
             const wrappedFiles = filesArr.map(f => new PathBuffer(f.data));
-            const validatedFiles = this.validationService.checkFiles(wrappedFiles);
+            const validatedFiles = await this.validationService.checkFiles(wrappedFiles);
             const errors = validatedFiles
                             .filter(file => !file.isValid())
                             .map(file => file.info);

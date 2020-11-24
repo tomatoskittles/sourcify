@@ -1,6 +1,6 @@
 import bunyan from 'bunyan';
 import Web3 from 'web3';
-import { StringMap } from '@ethereum-sourcify/core';
+import { StringMap, assertSingleKey } from '@ethereum-sourcify/core';
 import AdmZip from 'adm-zip';
 import fs from 'fs';
 import Path from 'path';
@@ -11,8 +11,6 @@ const fetch = require("node-fetch");
  * Regular expression matching metadata nested within another json.
  */
 const NESTED_METADATA_REGEX = /"{\\"compiler\\":{\\"version\\".*?},\\"version\\":1}"/;
-
-const GITHUB_REGEX = /^https?:\/\/github.com/;
 
 const IPFS_PREFIX = "dweb:/ipfs/";
 
@@ -62,17 +60,23 @@ export interface IValidationService {
     checkFiles(files: PathBuffer[]): Promise<CheckedContract[]>;
 }
 
+type ValidationOptions = {
+    /**a custom logger that logs all errors; undefined or no logger provided turns the logging off*/
+    logger: bunyan
+
+    /** if true, does not fetch missing sources */
+    offline: boolean
+}
+
 export class ValidationService implements IValidationService {
     logger: bunyan;
 
-    /** Should fetch missing sources */
-    fetch: boolean;
-    /**
-     * @param logger a custom logger that logs all errors; undefined or no logger provided turns the logging off
-     */
-    constructor(logger?: bunyan, fetch?: false) {
-        this.logger = logger;
-        this.fetch = fetch;
+    offline: boolean;
+
+    constructor(options: Partial<ValidationOptions> = {}) {
+        Object.assign(this, {
+            offline: false
+        }, options);
     }
 
     checkPaths(paths: string[], ignoring?: string[]): Promise<CheckedContract[]> {
@@ -186,11 +190,11 @@ export class ValidationService implements IValidationService {
             }
 
             if (metadata) {
-                const compilationTargetsNumber = Object.keys(metadata.settings.compilationTarget).length;
-                const expectedTargetsNumber = 1;
-                if (compilationTargetsNumber !== expectedTargetsNumber) {
-                    const msg = `Metadata (${file.path}) specifying ${compilationTargetsNumber} entries in compilationTarget; should be: ${expectedTargetsNumber}`;
-                }
+                assertSingleKey(
+                    metadata.settings.compilationTarget,
+                    `metadata.settings.compilationTarget at ${file.path}`,
+                    this.log.bind(this)
+                );
                 metadataCollection.push(metadata);
             }
         }
@@ -232,7 +236,7 @@ export class ValidationService implements IValidationService {
                 file = hash2file.get(hash) || file;
             }
 
-            if (!file.content && sourceInfo.urls) {
+            if (!file.content && !this.offline && sourceInfo.urls) {
                 const fetched = await this.processFetching(fileName, sourceInfo.urls, hash);
                 if (fetched) {
                     hash2file.set(hash, file);
@@ -259,20 +263,16 @@ export class ValidationService implements IValidationService {
     private storeByHash(files: PathContent[]): Map<string, PathContent> {
         const byHash: Map<string, PathContent> = new Map();
 
-        for (const i in files) {
-            const calculatedHash = Web3.utils.keccak256(files[i].content);
-            byHash.set(calculatedHash, files[i]);
+        for (const file of files) {
+            const calculatedHash = Web3.utils.keccak256(file.content);
+            byHash.set(calculatedHash, file);
         }
         return byHash;
     }
 
     private async processFetching(fileName: string, urls: string[], hash: string): Promise<string> {
         fileName = fileName.trim();
-        if (GITHUB_REGEX.test(fileName)) { // TODO test this case
-            const rawGithubUrl = fileName.replace("github", "raw.githubusercontent");
-            return this.performFetch(fileName, rawGithubUrl, hash);
-
-        } else if (fileName.startsWith("@openzeppelin")) {
+        if (fileName.startsWith("@openzeppelin")) {
             for (const url of urls) {
                 if (url.startsWith(IPFS_PREFIX)) {
                     const ipfsCode = url.slice(IPFS_PREFIX.length);
